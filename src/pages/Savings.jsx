@@ -6,7 +6,8 @@ import {
 } from 'recharts';
 import { useApp } from '../context/AppContext';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import { calcAvailableToSave, calcCumulativeSavings, calcPeriodSavings } from '../utils/calculations';
+import { calcProjection, calcCumulativeSavings, calcPeriodSavings } from '../utils/calculations';
+import { todayStr } from '../utils/formatters';
 
 const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
 const fadeUp = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } };
@@ -134,7 +135,9 @@ export default function Savings() {
   const [showModal, setShowModal] = useState(false);
 
   const pid = activePeriod?.id;
-  const availableToSave = calcAvailableToSave(incomes, obligations, socialWeeks, savings, pid);
+  const today = todayStr();
+  const projection = calcProjection(incomes, obligations, socialWeeks, savings, pid, today);
+  const availableToSave = projection.minBalance;
   const periodSavings = calcPeriodSavings(savings, pid);
   const cumulative = calcCumulativeSavings(savings);
 

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useCallback } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { v4 as uuidv4 } from 'uuid';
 import { todayStr } from '../utils/formatters';
+import { calcIpoRefund } from '../utils/calculations';
 
 const AppContext = createContext(null);
 
@@ -24,8 +25,6 @@ export function AppProvider({ children }) {
     const newPeriod = {
       id: uuidv4(),
       startDate: data.startDate || todayStr(),
-      expectedNextIncomeDate: data.expectedNextIncomeDate || null,
-      expectedNextIncomeAmount: data.expectedNextIncomeAmount || null,
       isActive: true,
       createdAt: new Date().toISOString(),
     };
@@ -48,14 +47,6 @@ export function AppProvider({ children }) {
 
     return newPeriod;
   }, [setPeriods, setIncomes]);
-
-  const updatePeriodExpectedIncome = useCallback((periodId, date, amount) => {
-    setPeriods(prev => prev.map(p =>
-      p.id === periodId
-        ? { ...p, expectedNextIncomeDate: date, expectedNextIncomeAmount: amount }
-        : p
-    ));
-  }, [setPeriods]);
 
   // === Income actions ===
   const addIncome = useCallback((data) => {
@@ -88,6 +79,8 @@ export function AppProvider({ children }) {
       dueDate: data.dueDate || null,
       isPaid: false,
       category: data.category || 'diger',
+      ipoEarmarked: false,
+      linkedIpoAppId: null,
       createdAt: new Date().toISOString(),
     };
     setObligations(prev => [...prev, obligation]);
@@ -96,12 +89,36 @@ export function AppProvider({ children }) {
 
   const toggleObligationPaid = useCallback((id) => {
     setObligations(prev => prev.map(o =>
-      o.id === id ? { ...o, isPaid: !o.isPaid, paidAt: !o.isPaid ? new Date().toISOString() : null } : o
+      o.id === id
+        ? { ...o, isPaid: !o.isPaid, paidAt: !o.isPaid ? new Date().toISOString() : null }
+        : o
     ));
   }, [setObligations]);
 
   const deleteObligation = useCallback((id) => {
     setObligations(prev => prev.filter(o => o.id !== id));
+  }, [setObligations]);
+
+  /**
+   * Mark an obligation as "parked in an IPO" — excluded from projection.
+   */
+  const setObligationIpoEarmark = useCallback((obligationId, ipoAppId) => {
+    setObligations(prev => prev.map(o =>
+      o.id === obligationId
+        ? { ...o, ipoEarmarked: true, linkedIpoAppId: ipoAppId }
+        : o
+    ));
+  }, [setObligations]);
+
+  /**
+   * Remove the IPO earmark from an obligation — re-enters projection.
+   */
+  const clearObligationIpoEarmark = useCallback((obligationId) => {
+    setObligations(prev => prev.map(o =>
+      o.id === obligationId
+        ? { ...o, ipoEarmarked: false, linkedIpoAppId: null }
+        : o
+    ));
   }, [setObligations]);
 
   // === Social week actions ===
@@ -152,16 +169,26 @@ export function AppProvider({ children }) {
 
   // === IPO actions ===
   const addIpoApplication = useCallback((data) => {
+    const estimatedLots = parseFloat(data.estimatedLots) || 0;
+    const pricePerLot = parseFloat(data.pricePerLot) || 0;
+    // Compute investedAmount for backward compat storage
+    const investedAmount = estimatedLots > 0 && pricePerLot > 0
+      ? estimatedLots * pricePerLot
+      : parseFloat(data.investedAmount) || 0;
+
     const app = {
       id: uuidv4(),
       company: data.company || '',
       applicationDate: data.applicationDate || todayStr(),
-      investedAmount: parseFloat(data.investedAmount) || 0,
-      lotsReceived: parseFloat(data.lotsReceived) || 0,
-      pricePerLot: parseFloat(data.pricePerLot) || 0,
+      estimatedLots,
+      allocatedLots: null,           // set after IPO allocation result
+      pricePerLot,
+      investedAmount,                // kept for backward compat
+      estimatedReturnDate: data.estimatedReturnDate || null,
       status: 'bekliyor',
       sales: [],
       transferredToIncome: false,
+      refundTransferred: false,
       createdAt: new Date().toISOString(),
     };
     setIpoApplications(prev => [...prev, app]);
@@ -175,6 +202,47 @@ export function AppProvider({ children }) {
   const deleteIpoApplication = useCallback((id) => {
     setIpoApplications(prev => prev.filter(a => a.id !== id));
   }, [setIpoApplications]);
+
+  /**
+   * Record the actual lots received after allocation.
+   * If fewer than estimated, a refund becomes available.
+   */
+  const setIpoAllocatedLots = useCallback((appId, allocatedLots) => {
+    setIpoApplications(prev => prev.map(a =>
+      a.id === appId
+        ? { ...a, allocatedLots: parseFloat(allocatedLots) }
+        : a
+    ));
+  }, [setIpoApplications]);
+
+  /**
+   * Transfer the partial-fill refund to income (cash on hand).
+   */
+  const transferIpoRefundToIncome = useCallback((appId) => {
+    if (!activePeriod) return;
+    const application = ipoApplications.find(a => a.id === appId);
+    if (!application) return;
+
+    const refund = calcIpoRefund(application);
+    if (refund <= 0) return;
+
+    const income = {
+      id: uuidv4(),
+      periodId: activePeriod.id,
+      date: todayStr(),
+      source: `IPO İadesi — ${application.company}`,
+      amount: refund,
+      type: 'ipo_refund',
+      ipoAppId: appId,
+      createdAt: new Date().toISOString(),
+    };
+
+    setIncomes(prev => [...prev, income]);
+    setIpoApplications(prev => prev.map(a =>
+      a.id === appId ? { ...a, refundTransferred: true } : a
+    ));
+    return income;
+  }, [activePeriod, ipoApplications, setIncomes, setIpoApplications]);
 
   const addIpoSale = useCallback((appId, saleData) => {
     const application = ipoApplications.find(a => a.id === appId);
@@ -233,8 +301,7 @@ export function AppProvider({ children }) {
   // === Savings actions ===
   const addSavings = useCallback((amount, note) => {
     if (!activePeriod) return;
-    const allSavings = savings;
-    const cumulative = allSavings.reduce((sum, s) => sum + (s.amount || 0), 0) + (parseFloat(amount) || 0);
+    const cumulative = savings.reduce((sum, s) => sum + (s.amount || 0), 0) + (parseFloat(amount) || 0);
 
     const saving = {
       id: uuidv4(),
@@ -253,7 +320,7 @@ export function AppProvider({ children }) {
     setSavings(prev => prev.filter(s => s.id !== id));
   }, [setSavings]);
 
-  // === Reset (for development) ===
+  // === Reset ===
   const resetAll = useCallback(() => {
     setPeriods([]);
     setIncomes([]);
@@ -275,7 +342,6 @@ export function AppProvider({ children }) {
 
     // Period
     startNewPeriod,
-    updatePeriodExpectedIncome,
 
     // Income
     addIncome,
@@ -285,6 +351,8 @@ export function AppProvider({ children }) {
     addObligation,
     toggleObligationPaid,
     deleteObligation,
+    setObligationIpoEarmark,
+    clearObligationIpoEarmark,
 
     // Social
     addOrUpdateSocialWeek,
@@ -295,6 +363,8 @@ export function AppProvider({ children }) {
     addIpoApplication,
     updateIpoApplication,
     deleteIpoApplication,
+    setIpoAllocatedLots,
+    transferIpoRefundToIncome,
     addIpoSale,
     transferIpoProfitToIncome,
 

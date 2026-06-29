@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Calendar, TrendingUp, ChevronRight } from 'lucide-react';
+import { Wallet, ArrowRight, Calendar, TrendingUp } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatCurrency, todayStr } from '../utils/formatters';
 
@@ -15,11 +15,6 @@ const steps = [
     title: 'Bu Dönem Ne Kadar Aldınız?',
     subtitle: 'Bugün veya son aldığınız gelir bilgisini girin',
   },
-  {
-    id: 'next_income',
-    title: 'Sonraki Gelir Beklentisi',
-    subtitle: 'Ne zaman tekrar gelir bekliyorsunuz? (isteğe bağlı)',
-  },
 ];
 
 export default function Onboarding({ onComplete }) {
@@ -29,8 +24,6 @@ export default function Onboarding({ onComplete }) {
     startDate: todayStr(),
     initialIncomeAmount: '',
     initialIncomeSource: 'Maaş',
-    expectedNextIncomeDate: '',
-    expectedNextIncomeAmount: '',
   });
 
   const updateForm = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
@@ -48,8 +41,6 @@ export default function Onboarding({ onComplete }) {
       startDate: form.startDate,
       initialIncomeAmount: parseFloat(form.initialIncomeAmount) || 0,
       initialIncomeSource: form.initialIncomeSource,
-      expectedNextIncomeDate: form.expectedNextIncomeDate || null,
-      expectedNextIncomeAmount: parseFloat(form.expectedNextIncomeAmount) || null,
     });
     onComplete?.();
   };
@@ -190,38 +181,7 @@ export default function Onboarding({ onComplete }) {
               </div>
             )}
 
-            {/* Step 2: Next income */}
-            {step === 2 && (
-              <div className="space-y-3">
-                <div className="glass-card p-5 space-y-4">
-                  <div>
-                    <label className="label">Beklenen Gelir Tarihi</label>
-                    <input
-                      id="onboarding-next-income-date"
-                      type="date"
-                      className="input-field"
-                      value={form.expectedNextIncomeDate}
-                      onChange={e => updateForm('expectedNextIncomeDate', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Tahmini Tutar (₺) — isteğe bağlı</label>
-                    <input
-                      id="onboarding-next-income-amount"
-                      type="number"
-                      className="input-field"
-                      value={form.expectedNextIncomeAmount}
-                      onChange={e => updateForm('expectedNextIncomeAmount', e.target.value)}
-                      placeholder="0"
-                      inputMode="decimal"
-                    />
-                  </div>
-                </div>
-                <p className="text-white/30 text-xs text-center">
-                  Bu bilgiyi daha sonra da girebilirsiniz
-                </p>
-              </div>
-            )}
+
           </motion.div>
         </AnimatePresence>
 
@@ -237,15 +197,7 @@ export default function Onboarding({ onComplete }) {
             {step === steps.length - 1 ? <Wallet size={18} /> : <ArrowRight size={18} />}
           </button>
 
-          {step === steps.length - 1 && (
-            <button
-              id="onboarding-skip-next"
-              onClick={handleComplete}
-              className="w-full text-white/40 text-sm py-2 hover:text-white/60 transition-colors"
-            >
-              Atla, sonra eklerim
-            </button>
-          )}
+
         </div>
       </div>
     </div>

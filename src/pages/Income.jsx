@@ -1,40 +1,37 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Trash2, TrendingUp, Calendar, X, ChevronDown, Edit3 } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, Calendar, X, ChevronDown, Edit3, Clock } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { formatCurrency, formatDate, formatDateLong, todayStr, daysUntil } from '../utils/formatters';
-import { calcTotalIncome } from '../utils/calculations';
+import { formatCurrency, formatDate, todayStr } from '../utils/formatters';
+import { calcCashOnHand, calcUpcomingIncome } from '../utils/calculations';
 
-const stagger = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.06 } },
-};
-const fadeUp = {
-  hidden: { opacity: 0, y: 12 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
-};
+const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
+const fadeUp = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } };
 
 const incomeTypes = {
-  regular: { label: 'Düzenli', color: 'badge-info' },
-  ipo_profit: { label: 'IPO Kârı', color: 'badge-success' },
-  bonus: { label: 'Bonus', color: 'badge-warning' },
-  other: { label: 'Diğer', color: 'badge-neutral' },
+  regular:    { label: 'Düzenli',    color: 'badge-info' },
+  ipo_profit: { label: 'IPO Kârı',   color: 'badge-success' },
+  ipo_refund: { label: 'IPO İadesi', color: 'badge-warning' },
+  bonus:      { label: 'Bonus',      color: 'badge-warning' },
+  other:      { label: 'Diğer',      color: 'badge-neutral' },
 };
 
 const sourceOptions = ['Maaş', 'Serbest Meslek', 'Kira Geliri', 'Satış', 'IPO Kârı', 'Diğer'];
 
 function AddIncomeModal({ onClose }) {
   const { addIncome } = useApp();
+  const today = todayStr();
   const [form, setForm] = useState({
-    date: todayStr(),
+    date: today,
     source: 'Maaş',
     customSource: '',
     amount: '',
     type: 'regular',
   });
-
   const update = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const [showCustom, setShowCustom] = useState(false);
+
+  const isUpcoming = form.date > today;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -68,6 +65,14 @@ function AddIncomeModal({ onClose }) {
           <div>
             <label className="label">Tarih</label>
             <input id="income-date" type="date" className="input-field" value={form.date} onChange={e => update('date', e.target.value)} />
+            {/* Live preview of on-hand vs upcoming */}
+            {isUpcoming ? (
+              <p className="flex items-center gap-1.5 text-accent-glow text-xs mt-1.5">
+                <Clock size={11} /> Bu gelir bugünden sonraki — "Yaklaşan Gelir" olarak kaydedilecek
+              </p>
+            ) : (
+              <p className="text-emerald-400 text-xs mt-1.5">✓ Eldeki Nakit'e eklenecek</p>
+            )}
           </div>
 
           <div>
@@ -80,9 +85,7 @@ function AddIncomeModal({ onClose }) {
                   id={`source-${s}`}
                   onClick={() => { update('source', s); setShowCustom(false); }}
                   className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all duration-150 ${
-                    !showCustom && form.source === s
-                      ? 'bg-accent-blue text-white'
-                      : 'glass-card text-white/50 hover:text-white/80'
+                    !showCustom && form.source === s ? 'bg-accent-blue text-white' : 'glass-card text-white/50 hover:text-white/80'
                   }`}
                 >
                   {s}
@@ -92,9 +95,7 @@ function AddIncomeModal({ onClose }) {
                 type="button"
                 id="source-custom"
                 onClick={() => setShowCustom(true)}
-                className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all duration-150 ${
-                  showCustom ? 'bg-accent-blue text-white' : 'glass-card text-white/50'
-                }`}
+                className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all duration-150 ${showCustom ? 'bg-accent-blue text-white' : 'glass-card text-white/50'}`}
               >
                 <Edit3 size={13} className="inline mr-1" />Özel
               </button>
@@ -144,7 +145,7 @@ function AddIncomeModal({ onClose }) {
               required
             />
             {form.amount && (
-              <p className="text-emerald-400 text-sm mt-1.5 font-medium">
+              <p className={`text-sm mt-1.5 font-medium ${isUpcoming ? 'text-accent-glow' : 'text-emerald-400'}`}>
                 {formatCurrency(parseFloat(form.amount) || 0)}
               </p>
             )}
@@ -160,88 +161,28 @@ function AddIncomeModal({ onClose }) {
   );
 }
 
-function ExpectedIncomeSection() {
-  const { activePeriod, updatePeriodExpectedIncome } = useApp();
-  const [editing, setEditing] = useState(false);
-  const [date, setDate] = useState(activePeriod?.expectedNextIncomeDate || '');
-  const [amount, setAmount] = useState(activePeriod?.expectedNextIncomeAmount || '');
-
-  if (!activePeriod) return null;
-
-  const daysLeft = activePeriod.expectedNextIncomeDate
-    ? daysUntil(activePeriod.expectedNextIncomeDate)
-    : null;
-
-  const handleSave = () => {
-    updatePeriodExpectedIncome(activePeriod.id, date || null, parseFloat(amount) || null);
-    setEditing(false);
-  };
-
-  return (
-    <div className="glass-card p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="section-title">Sonraki Gelir Beklentisi</h3>
-        <button
-          id="edit-expected-income"
-          onClick={() => setEditing(!editing)}
-          className="btn-secondary !px-3 !py-1.5 text-xs"
-        >
-          <Edit3 size={13} /> Düzenle
-        </button>
-      </div>
-
-      {editing ? (
-        <div className="space-y-3">
-          <div>
-            <label className="label">Beklenen Tarih</label>
-            <input id="expected-date" type="date" className="input-field" value={date} onChange={e => setDate(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Tahmini Tutar (₺)</label>
-            <input id="expected-amount" type="number" className="input-field" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" inputMode="decimal" />
-          </div>
-          <div className="flex gap-2">
-            <button id="save-expected" onClick={handleSave} className="flex-1 btn-primary !py-2.5 text-sm">Kaydet</button>
-            <button id="cancel-expected" onClick={() => setEditing(false)} className="btn-secondary !py-2.5 text-sm">İptal</button>
-          </div>
-        </div>
-      ) : activePeriod.expectedNextIncomeDate ? (
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-white font-semibold">{formatDateLong(activePeriod.expectedNextIncomeDate)}</p>
-            {activePeriod.expectedNextIncomeAmount && (
-              <p className="text-emerald-400 text-sm mt-0.5">~{formatCurrency(activePeriod.expectedNextIncomeAmount)}</p>
-            )}
-          </div>
-          {daysLeft !== null && (
-            <div className={`px-3 py-2 rounded-xl text-center ${daysLeft <= 7 ? 'bg-rose-500/15' : 'bg-accent-blue/10'}`}>
-              <p className={`text-xl font-bold tabular-nums ${daysLeft <= 7 ? 'text-rose-400' : 'text-accent-blue'}`}>
-                {Math.max(0, daysLeft)}
-              </p>
-              <p className="text-white/30 text-[10px]">gün kaldı</p>
-            </div>
-          )}
-        </div>
-      ) : (
-        <p className="text-white/30 text-sm">Henüz beklenti girilmedi</p>
-      )}
-    </div>
-  );
-}
-
 export default function Income() {
   const { activePeriod, incomes, deleteIncome, periods } = useApp();
+  const today = todayStr();
   const [showModal, setShowModal] = useState(false);
   const [viewPeriodId, setViewPeriodId] = useState(activePeriod?.id || null);
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
 
   const currentPeriodId = viewPeriodId || activePeriod?.id;
   const periodIncomes = incomes.filter(i => i.periodId === currentPeriodId);
-  const totalIncome = calcTotalIncome(incomes, currentPeriodId);
   const viewedPeriod = periods.find(p => p.id === currentPeriodId);
   const isActive = currentPeriodId === activePeriod?.id;
 
-  const sorted = [...periodIncomes].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const cashOnHand = calcCashOnHand(incomes, currentPeriodId, today);
+  const upcomingIncome = calcUpcomingIncome(incomes, currentPeriodId, today);
+
+  // Split into past/upcoming for display
+  const pastIncomes = [...periodIncomes]
+    .filter(i => i.date <= today)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const futureIncomes = [...periodIncomes]
+    .filter(i => i.date > today)
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   return (
     <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-4">
@@ -301,31 +242,85 @@ export default function Income() {
         </motion.div>
       )}
 
-      {/* Total */}
-      <motion.div variants={fadeUp} className="glass-card p-5 bg-gradient-to-br from-emerald-500/15 to-transparent border-emerald-500/10">
-        <p className="stat-label mb-1">Dönem Toplam Gelir</p>
-        <p className="text-3xl font-bold text-emerald-400 tabular-nums">{formatCurrency(totalIncome)}</p>
-        <p className="text-white/30 text-xs mt-1">{periodIncomes.length} gelir kaydı</p>
-      </motion.div>
+      {/* Split income summary */}
+      <div className="grid grid-cols-2 gap-3">
+        <motion.div variants={fadeUp} className="glass-card p-4 bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 border-emerald-500/15">
+          <p className="stat-label mb-1">Eldeki Nakit</p>
+          <p className="text-xl font-bold text-emerald-400 tabular-nums">{formatCurrency(cashOnHand)}</p>
+          <p className="text-white/30 text-xs mt-1">{pastIncomes.length} kayıt</p>
+        </motion.div>
+        <motion.div variants={fadeUp} className={`glass-card p-4 bg-gradient-to-br border ${upcomingIncome > 0 ? 'from-accent-blue/20 to-accent-blue/5 border-accent-blue/15' : 'from-white/[0.03] to-transparent border-white/[0.06]'}`}>
+          <p className="stat-label mb-1">Yaklaşan Gelir</p>
+          <p className={`text-xl font-bold tabular-nums ${upcomingIncome > 0 ? 'text-accent-glow' : 'text-white/20'}`}>
+            {formatCurrency(upcomingIncome)}
+          </p>
+          <p className="text-white/30 text-xs mt-1">{futureIncomes.length} kayıt</p>
+        </motion.div>
+      </div>
 
-      {/* Expected income */}
-      {isActive && (
-        <motion.div variants={fadeUp}>
-          <ExpectedIncomeSection />
+      {/* Upcoming income list */}
+      {futureIncomes.length > 0 && (
+        <motion.div variants={fadeUp} className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Clock size={14} className="text-accent-glow" />
+            <h3 className="section-title text-accent-glow">Yaklaşan ({futureIncomes.length})</h3>
+          </div>
+          <AnimatePresence>
+            {futureIncomes.map(income => {
+              const typeInfo = incomeTypes[income.type] || incomeTypes.other;
+              const daysAway = Math.round((new Date(income.date + 'T00:00:00') - new Date(today + 'T00:00:00')) / (1000 * 60 * 60 * 24));
+              return (
+                <motion.div
+                  key={income.id}
+                  layout
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 10, height: 0 }}
+                  className="glass-card p-4 flex items-center justify-between border-accent-blue/10"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-accent-blue/10 flex items-center justify-center flex-shrink-0">
+                      <Clock size={18} className="text-accent-glow" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-white font-medium text-sm truncate">{income.source}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-white/40 text-xs">{formatDate(income.date)}</p>
+                        <span className="badge badge-info text-[10px]">{daysAway} gün</span>
+                        <span className={`${typeInfo.color} text-[10px] px-1.5 py-0.5 rounded-full`}>{typeInfo.label}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                    <p className="text-accent-glow font-bold tabular-nums">{formatCurrency(income.amount)}</p>
+                    {isActive && (
+                      <button
+                        id={`delete-income-${income.id}`}
+                        onClick={() => deleteIncome(income.id)}
+                        className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400/60 hover:bg-rose-500/20 hover:text-rose-400 flex items-center justify-center transition-all"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
         </motion.div>
       )}
 
-      {/* Income list */}
+      {/* Past income list */}
       <motion.div variants={fadeUp} className="space-y-2">
-        <h3 className="section-title">Gelir Geçmişi</h3>
-        {sorted.length === 0 ? (
+        <h3 className="section-title">Alınan Gelirler</h3>
+        {pastIncomes.length === 0 ? (
           <div className="glass-card p-8 text-center">
             <TrendingUp size={32} className="text-white/15 mx-auto mb-3" />
             <p className="text-white/30 text-sm">Henüz gelir kaydı yok</p>
           </div>
         ) : (
           <AnimatePresence>
-            {sorted.map(income => {
+            {pastIncomes.map(income => {
               const typeInfo = incomeTypes[income.type] || incomeTypes.other;
               return (
                 <motion.div
